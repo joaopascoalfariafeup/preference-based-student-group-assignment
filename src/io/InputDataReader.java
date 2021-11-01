@@ -17,19 +17,27 @@ import model.Student;
 import model.StudentPreference;
 
 public class InputDataReader {
-	private String coursesFilename, groupsFilename, scheduleFilename, groupCompositesFilename, preferencesFilename, gradesFilename, procVersion;
+	private String coursesFilename, groupsFilename, scheduleFilename, groupCompositesFilename, preferencesFilename, gradesFilename, enrollmentsFilename, procVersion;
 	private int semester;
 	private Map<String, Course> courses;
 	private Schedule schedule;
 	private Map<String, Student> students;
 	
-	public InputDataReader(String coursesFilename, String groupsFilename, String scheduleFilename, String groupCompositesFilename, String preferencesFilename, String gradesFilename, int semester, String procVersion) throws IOException {
+	// JPF 11Fev2019, for improved error handling
+	public static class InvalidInputDataException extends Exception {
+		public InvalidInputDataException(String msg){
+			super(msg);
+		}
+	}
+	
+	public InputDataReader(String coursesFilename, String groupsFilename, String scheduleFilename, String groupCompositesFilename, String preferencesFilename, String gradesFilename, String enrollmentsFilename, int semester, String procVersion) throws IOException {
 		this.coursesFilename = coursesFilename;
 		this.groupsFilename = groupsFilename;
 		this.scheduleFilename = scheduleFilename;
 		this.groupCompositesFilename = groupCompositesFilename;
 		this.preferencesFilename = preferencesFilename;
 		this.gradesFilename = gradesFilename;
+		this.enrollmentsFilename = enrollmentsFilename;
 		this.semester = semester;
 		this.procVersion = procVersion;
 		this.courses = new HashMap<>();
@@ -37,13 +45,14 @@ public class InputDataReader {
 		this.students = new HashMap<>();
 	}
 	
-	public void readData() throws IOException {
+	public void readData() throws IOException, InvalidInputDataException {
 		readCourses();
 		readGroups();
 		readSchedule();
 		readStudents();
-		readStudentsGrades();		
 		makeStudentsAdjustments();
+		readEnrollments();
+		readStudentsGrades();		
 	}
 	
 	public Map<String, Course> getCourses() {
@@ -57,6 +66,33 @@ public class InputDataReader {
 	public Map<String, Student> getStudents() {
 		return students;
 	}
+
+	// JPF 11Fev2019
+	private String[] weekDayNames = {"seg", "ter", "qua", "qui", "sex", "sab"};
+	
+	// JPF 11Fev2019
+	private String[] splitAndTrim(String line) {
+		String[] s = line.split(";");
+		for (int i = 0; i < s.length; i++)
+			s[i] = s[i].trim();
+		return s;
+	}
+
+	// JPF 11Fev2019
+	private int parseWeekDay(String weekDayStr) throws InvalidInputDataException {
+		if (weekDayStr.length() == 1)
+			return Integer.parseInt(weekDayStr) - 2;
+		else
+			for (int i = 0; i < weekDayNames.length; i++)
+				if (weekDayNames[i].toLowerCase().startsWith(weekDayStr.toLowerCase()))
+					return i;
+		throw new InvalidInputDataException("Invalid week day: " + weekDayStr);
+	}
+	
+	// JPF 11Fev2019
+	private float parseFloat(String num) {
+		return Float.parseFloat(num.replace(',', '.'));
+	}
 	
 	private void readCourses() throws IOException {
 		BufferedReader reader = new BufferedReader(new FileReader(coursesFilename));
@@ -64,9 +100,10 @@ public class InputDataReader {
 		String fileLine;
 		
 		while ((fileLine = reader.readLine()) != null) {
-			String[] line = fileLine.split(";");
+			String[] line = splitAndTrim(fileLine);
 			
-			if (!((semester == 1 && line[3].equals("1S")) || (semester == 2 && line[3].equals("2S")))) continue;
+			if (!((semester == 1 && line[3].equals("1S")) || (semester == 2 && line[3].equals("2S")))) 
+				continue;
 			
 			String courseCode = line[0];
 			int weeklyTimeslots = Integer.parseInt(line[4]) * 2; // Input data is in hours (2*timeslots)
@@ -78,20 +115,35 @@ public class InputDataReader {
 		reader.close();
 	}
 	
-	private void readGroups() throws IOException {
+	private void readGroups() throws IOException, InvalidInputDataException {
 		BufferedReader reader = new BufferedReader(new FileReader(groupsFilename));
 		reader.readLine();
 		String fileLine;
 		
 		while ((fileLine = reader.readLine()) != null) {
-			String[] line = fileLine.split(";");
+			String[] line = splitAndTrim(fileLine);
 			
 			String courseCode = line[0];
 			String groupCode = line[1];
 			int groupCapacity = Integer.parseInt(line[2]);
+			if (line.length == 4) {
+				int numStudentsEnrolled = Integer.parseInt(line[3]);
+				groupCapacity -= numStudentsEnrolled;
+			}
+
+			// JPF 11Fev2019
+			if (groupCapacity < 0)
+				groupCapacity = 0;
 			
-			Group thisGroup = new Group(groupCode, groupCapacity, 1f);
-			courses.get(courseCode).getGroups().put(groupCode, thisGroup);
+			Course course = courses.get(courseCode);
+			
+			// JPF 11Fev2019
+			if (course == null) {
+				reader.close();
+				throw new InvalidInputDataException("Course not found: " + courseCode);
+			}
+			Group thisGroup = new Group(groupCode, groupCapacity);
+			course.addGroup(thisGroup);
 		}
 		
 		reader.close();
@@ -105,15 +157,20 @@ public class InputDataReader {
 		String fileLine;
 		
 		while ((fileLine = reader.readLine()) != null) {
-			String[] line = fileLine.split(";");
+			String[] line = splitAndTrim(fileLine);
 			
 			String compositeName = line[0];
-			Set<String> groupCodes = new HashSet<>();
+			
+			//Set<String> groupCodes = new HashSet<>(); JPF 10FEV2019			
+			Set<String> groupCodes = groupComposites.get(compositeName);
+			if (groupCodes == null)
+				groupCodes = new HashSet<>();
 			
 			for (int i = 1; i < line.length; ++i) {
 				String groupCode = line[i];
 				
-				if (groupCode.equals("")) break;
+				if (groupCode.equals("")) 
+					break;
 				
 				groupCodes.add(groupCode);
 			}
@@ -126,7 +183,7 @@ public class InputDataReader {
 		return groupComposites;
 	}
 	
-	private void readSchedule() throws IOException {
+	private void readSchedule() throws IOException, InvalidInputDataException {
 		Map<String, Set<String>> groupComposites = readGroupComposites();
 		
 		BufferedReader reader = new BufferedReader(new FileReader(scheduleFilename));
@@ -134,23 +191,30 @@ public class InputDataReader {
 		String fileLine;
 		
 		while ((fileLine = reader.readLine()) != null) {
-			String[] line = fileLine.split(";");
+			String[] line = splitAndTrim(fileLine);
 			
 			String groupCode = line[0];
 			String courseCode = line [1];
-			int weekDay = Integer.parseInt(line[2]) - 2;
-			int startTime = (int) ((Float.parseFloat(line[3]) - 8) * 2);
-			int duration = (int) (Float.parseFloat(line[4]) * 2);
+			int weekDay = parseWeekDay(line[2]);
+			int startTime = (int) ((parseFloat(line[3]) - 8) * 2  + 0.00001); // JPF 14Set2019 soma 0.001
+			int duration = (int) (parseFloat(line[4]) * 2 + 0.00001); // JPF 14Set2019 soma 0.0001
 			boolean isPracticalClass = line[5].equals("T") ? false : true;
 			
 			Course thisCourse = courses.get(courseCode);
+
+			// JPF 11Fev2019
+			if (thisCourse == null) {
+				reader.close();
+				throw new InvalidInputDataException("Course not found: " + courseCode);
+			}	
 			Set<String> groupsFromComposite = groupComposites.get(groupCode);
 			
 			if (groupsFromComposite == null) { // If this is not a group composite, add it to the schedule
 				Group thisGroup = thisCourse.getGroups().get(groupCode);
-				
-				adjust1stYearCapacity(thisGroup);
-				schedule.addCourseGroup(thisCourse, thisGroup, isPracticalClass, weekDay, startTime, duration);
+				if (thisGroup == null)
+					System.err.println("Grupo não encontrado: " + groupCode);
+				else
+					schedule.addCourseGroup(thisCourse, thisGroup, isPracticalClass, weekDay, startTime, duration);
 			}
 			else {
 				for (String groupFromComposite : groupsFromComposite) { // If it is, add all the individual groups to the schedule
@@ -165,31 +229,14 @@ public class InputDataReader {
 		reader.close();
 	}
 	
-	// 1st year students (~117) are manually distributed through groups 1 to 6. This method makes the necessary adjustment in group capacities
-	private void adjust1stYearCapacity(Group group) {
-		switch (group.getCode()) {
-		case "1MIEIC01":
-		case "1MIEIC02":
-		case "1MIEIC03":
-			group.setCapacity(group.getCapacity() - 20);
-			break;
-		case "1MIEIC04":
-		case "1MIEIC05":
-		case "1MIEIC06":
-			group.setCapacity(group.getCapacity() - 19);
-			break;
-		default:
-			break;
-		}
-	}
 	
-	private void readStudents() throws IOException {
+	private void readStudents() throws IOException, InvalidInputDataException {
 		BufferedReader reader = new BufferedReader(new FileReader(preferencesFilename));
 		reader.readLine();
 		String fileLine;
 		
 		while ((fileLine = reader.readLine()) != null) {
-			String[] line = fileLine.split(";");
+			String[] line = splitAndTrim(fileLine);
 			
 			if (!line[0].equals(procVersion)) continue;
 			
@@ -215,12 +262,58 @@ public class InputDataReader {
 			}
 			
 			Course thisCourse = courses.get(courseCode);
+
+			// JPF 11Fev2019
+			if (thisCourse == null) {
+				reader.close();
+				throw new InvalidInputDataException("Course not found: " + courseCode);
+			}
+			
 			Group thisGroup = thisCourse.getGroups().get(groupCode);
+
+			// JPF 11FEV2019
+			if (thisGroup == null) {
+				reader.close();
+				throw new InvalidInputDataException("Course-Group combination not found: " + courseCode + "-" + groupCode);
+			}
 			
 			thisPreference.addCourseGroupPair(thisCourse, thisGroup);
 			
-			thisStudent.getEnrolledCourses().add(thisCourse); // Add it to the list of this student's enrollments
-			thisStudent.setWantedPeriodsTrue(thisGroup.getOccupiedPeriods());
+			//thisStudent.getEnrolledCourses().add(thisCourse); // Add it to the list of this student's enrollments
+			//thisStudent.setWantedPeriodsTrue(thisGroup.getOccupiedPeriods());
+		}
+		
+		reader.close();
+	}
+	
+	// JPF 18Fev2019
+	private void readEnrollments() throws IOException, InvalidInputDataException {
+		BufferedReader reader = new BufferedReader(new FileReader(enrollmentsFilename));
+		reader.readLine();
+		String fileLine;
+		
+		while ((fileLine = reader.readLine()) != null) {
+			String[] line = splitAndTrim(fileLine);
+			
+			String studentCode = line[0];
+			String studentName = line[1];
+			String courseCode = line[2];
+			
+			Student thisStudent = students.get(studentCode);
+			if (thisStudent == null) { // If this is a new student, create and add to the students map
+				thisStudent = new Student(studentCode, studentName);
+				students.put(studentCode, thisStudent);
+			}
+			
+			Course thisCourse = courses.get(courseCode);
+
+			if (thisCourse == null) {
+				//reader.close();
+				//throw new InvalidInputDataException("Course not found: " + courseCode);
+				System.out.println("Course not found (enrollment ignored): " + courseCode);
+			}
+			else
+				thisStudent.addEnrolledCourse(thisCourse, true); 
 		}
 		
 		reader.close();
@@ -242,27 +335,45 @@ public class InputDataReader {
 			student.setPreferences(preferencesWithoutDuplicates);
 			
 			// Count each course's number of students enrolled
-			for (Course course : student.getEnrolledCourses()) {
-				course.incNumEnrollments();
+			//for (Course course : student.getEnrolledCourses()) {
+			//	course.incNumEnrollments();
+			//}
+
+			// JPF09FEV2020
+			// Determine maxOptionalCourses 
+			int maxOptionalCourses = 0;
+			for (StudentPreference preference : student.getPreferences()) {
+				int num = 0;
+				for (Course course : preference.getCourseGroupPairs().keySet())
+					if (!course.getMandatory())
+						num++;
+				if (num > maxOptionalCourses)
+					maxOptionalCourses = num;
 			}
+			student.setMaxOptionalCourses(maxOptionalCourses);
 		}
 	}
 	
-	private void readStudentsGrades() throws IOException {
+	private void readStudentsGrades() throws IOException, InvalidInputDataException {
 		BufferedReader reader = new BufferedReader(new FileReader(gradesFilename));
 		reader.readLine();
 		String fileLine;
 		
 		while ((fileLine = reader.readLine()) != null) {
-			String[] line = fileLine.split(";");
+			String[] line = splitAndTrim(fileLine);
 			
 			String studentCode = line[0];
-			float studentGrade = (line.length == 1 || line[1].equals("0")) ? 1 : Float.parseFloat(line[1]); // Some students have missing grade information
+			float studentGrade = (line.length == 1 || line[1].equals("0")) ? 10 : parseFloat(line[1]); // Some students have missing grade information
 			
 			Student thisStudent = students.get(studentCode);
 			if (thisStudent != null) { // If the student isn't found, it means they're not being assigned to groups in this process version
 				thisStudent.setAvgGrade(studentGrade);
+
+				// JPF23OCT2021
+				if (line.length >= 3 && parseFloat(line[2]) == 1.0)
+					thisStudent.setMustFullfillPreference(true);
 			}
+			
 		}
 		
 		reader.close();

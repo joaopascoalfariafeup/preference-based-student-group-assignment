@@ -6,9 +6,9 @@ import java.util.Map;
 public class Course {
 	private String code;
 	private boolean mandatory; // True if mandatory; false if optional
-	private int weeklyTimeslots;
-	private Map<String, Group> groups;
-	private int numEnrollments;
+	private int weeklyTimeslots; // Number of half an hour time slots per week
+	private Map<String, Group> groups; 
+	private int numEnrollments; // Number of students enrolled
 	
 	public Course(String code, boolean mandatory, int weeklyTimeslots) {
 		this.code = code;
@@ -28,6 +28,10 @@ public class Course {
 	
 	public int getWeeklyTimeslots() {
 		return weeklyTimeslots;
+	}
+	
+	public void addGroup(Group group) {
+		groups.put(group.getCode(), group);
 	}
 	
 	public Map<String, Group> getGroups() {

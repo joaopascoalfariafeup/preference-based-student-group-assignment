@@ -50,11 +50,7 @@ public class OutputDataWriter {
 			Integer enrolledStudents = courseEnrollments.get(course);
 			if (enrolledStudents == null) continue;
 			
-			int totalCapacity = 0;
-			
-			for (Group group : course.getGroups().values()) {
-				totalCapacity += group.getCapacity();
-			}
+			int totalCapacity = course.calculateSumGroupCapacities();
 			
 			float ratio = (float) totalCapacity / enrolledStudents * 100;
 			
@@ -73,6 +69,7 @@ public class OutputDataWriter {
 	
 	private void writeToFile(String filename, String output) throws IOException {
 		BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(filename), "utf-8"));
+		writer.write("\ufeff"); // Adding BOM for compatibility with Excel
 		writer.write(output);
 		writer.close();
 	}

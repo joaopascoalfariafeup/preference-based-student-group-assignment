@@ -9,7 +9,7 @@ import java.util.Set;
 
 public class Schedule implements Iterable<Timeslot> {
 	private List<List<Timeslot>> schedule;
-	
+		
 	public Schedule() {
 		schedule = new ArrayList<>();
 		

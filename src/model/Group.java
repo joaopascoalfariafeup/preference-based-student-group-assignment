@@ -8,17 +8,19 @@ import ilog.concert.IloIntVar;
 import ilog.concert.IloLinearIntExpr;
 import ilog.cplex.IloCplex;
 
+
 public class Group {
 	private String code;
 	private int capacity;
-	private float minUtilization; // Minimum percentage of students assigned to this group, relative to the theoretical number of students who should be assigned to it
 	private IloLinearIntExpr sumAllAssignedStudents; // Sum of all decision variables indicating whether a student has been assigned to this group
+	private IloLinearIntExpr sumAllAssignedStudentsEven; // with even code
+	private IloLinearIntExpr sumAllAssignedStudentsOdd; // with even code
 	private Set<Integer> occupiedPeriods;
+
 	
-	public Group(String code, int capacity, float minUtilization) {
+	public Group(String code, int capacity) {
 		this.code = code;
 		this.capacity = capacity;
-		this.minUtilization = minUtilization;
 		this.occupiedPeriods = new HashSet<>();
 	}
 	
@@ -34,17 +36,25 @@ public class Group {
 		this.capacity = capacity;
 	}
 	
-	public float getMinUtilization() {
-		return minUtilization;
-	}
-	
 	public IloLinearIntExpr getSumAllAssignedStudents() {
 		return sumAllAssignedStudents;
 	}
 	
-	public void addTermToSumAllAssignedStudents(IloCplex cplex, IloIntVar var_preferenceAssigned) throws IloException {
-		if (sumAllAssignedStudents == null) sumAllAssignedStudents = cplex.linearIntExpr();
+	public void addTermToSumAllAssignedStudents(IloCplex cplex, IloIntVar var_preferenceAssigned, Student student) throws IloException {
+		if (sumAllAssignedStudents == null) 
+			sumAllAssignedStudents = cplex.linearIntExpr();
+		if (sumAllAssignedStudentsOdd == null) 
+			sumAllAssignedStudentsOdd = cplex.linearIntExpr();
+		if (sumAllAssignedStudentsEven == null) 
+			sumAllAssignedStudentsEven = cplex.linearIntExpr();
+		
 		sumAllAssignedStudents.addTerm(1, var_preferenceAssigned);
+		
+		// JPF 22SET2020
+		if (student.isEven())
+			sumAllAssignedStudentsEven.addTerm(1, var_preferenceAssigned);
+		if (student.isOdd())
+			sumAllAssignedStudentsOdd.addTerm(1, var_preferenceAssigned);
 	}
 	
 	public Set<Integer> getOccupiedPeriods() {
@@ -71,5 +81,13 @@ public class Group {
 	@Override
 	public String toString() {
 		return code;
+	}
+
+	public IloLinearIntExpr getSumAllAssignedStudentsOdd() {
+		return sumAllAssignedStudentsOdd;
+	}
+
+	public IloLinearIntExpr getSumAllAssignedStudentsEven() {
+		return sumAllAssignedStudentsEven;
 	}
 }
